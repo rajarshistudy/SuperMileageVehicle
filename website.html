@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Dashboard</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+
+        .dashboard {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .speedometer {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto;
+        }
+
+        .speed-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .speed-value {
+            font-size: 72px;
+            font-weight: bold;
+            color: #00d4ff;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+        }
+
+        .speed-unit {
+            font-size: 24px;
+            color: #888;
+            margin-top: -10px;
+        }
+
+        .connection-status {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .connected {
+            background: rgba(0, 255, 0, 0.2);
+            color: #0f0;
+        }
+
+        .disconnected {
+            background: rgba(255, 0, 0, 0.2);
+            color: #f00;
+        }
+
+        .config {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .config input {
+            padding: 8px;
+            width: 200px;
+            margin: 5px;
+            border-radius: 5px;
+            border: 1px solid #444;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .config button {
+            padding: 8px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            border: none;
+            background: #00d4ff;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .config button:hover {
+            background: #00a8cc;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="config">
+            <div>
+                <input type="text" id="ipInput" placeholder="Raspberry Pi IP" value="100.87.246.5">
+                <input type="text" id="portInput" placeholder="Port" value="8765">
+            </div>
+            <button onclick="connectWebSocket()">Connect</button>
+        </div>
+
+        <div class="speedometer">
+            <canvas id="speedCanvas" width="300" height="300"></canvas>
+            <div class="speed-display">
+                <div class="speed-value" id="speedValue">0</div>
+                <div class="speed-unit">MPH</div>
+            </div>
+        </div>
+
+        <div class="connection-status disconnected" id="status">
+            Disconnected
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        const canvas = document.getElementById('speedCanvas');
+        const ctx = canvas.getContext('2d');
+        const speedValue = document.getElementById('speedValue');
+        const statusDiv = document.getElementById('status');
+
+        let currentSpeed = 0;
+        let targetSpeed = 0;
+
+        function connectWebSocket() {
+            const ip = document.getElementById('ipInput').value;
+            const port = document.getElementById('portInput').value;
+            const wsUrl = `ws://${ip}:${port}`;
+
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('Connected to Raspberry Pi');
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'connection-status connected';
+            };
+
+            ws.onmessage = (event) => {
+                console.log('Received:', event.data);
+                
+                // Parse the speed from the message
+                // Expects format like: "speed:65" or just "65"
+                let speed = parseFloat(event.data);
+                
+                // If the message contains "speed:", extract the number
+                if (event.data.includes(':')) {
+                    speed = parseFloat(event.data.split(':')[1]);
+                }
+                
+                if (!isNaN(speed)) {
+                    targetSpeed = Math.max(0, Math.min(160, speed)); // Clamp between 0-160
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusDiv.textContent = 'Connection Error';
+                statusDiv.className = 'connection-status disconnected';
+            };
+
+            ws.onclose = () => {
+                console.log('Connection closed');
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'connection-status disconnected';
+            };
+        }
+
+        function drawSpeedometer() {
+            const centerX = 150;
+            const centerY = 150;
+            const radius = 120;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw outer circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 10;
+            ctx.stroke();
+
+            // Draw speed arc (0-160 mph scale)
+            const startAngle = Math.PI * 0.75; // Start at 135 degrees
+            const endAngle = Math.PI * 2.25;   // End at 405 degrees
+            const speedAngle = startAngle + (currentSpeed / 160) * (endAngle - startAngle);
+
+            // Draw colored arc based on speed
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, startAngle, speedAngle);
+            
+            if (currentSpeed < 60) {
+                ctx.strokeStyle = '#0f0'; // Green
+            } else if (currentSpeed < 100) {
+                ctx.strokeStyle = '#ff0'; // Yellow
+            } else {
+                ctx.strokeStyle = '#f00'; // Red
+            }
+            ctx.lineWidth = 10;
+            ctx.stroke();
+
+            // Draw tick marks
+            for (let i = 0; i <= 160; i += 20) {
+                const angle = startAngle + (i / 160) * (endAngle - startAngle);
+                const x1 = centerX + Math.cos(angle) * (radius - 15);
+                const y1 = centerY + Math.sin(angle) * (radius - 15);
+                const x2 = centerX + Math.cos(angle) * (radius - 5);
+                const y2 = centerY + Math.sin(angle) * (radius - 5);
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = '#666';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw numbers
+                const textX = centerX + Math.cos(angle) * (radius - 30);
+                const textY = centerY + Math.sin(angle) * (radius - 30);
+                ctx.fillStyle = '#888';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(i, textX, textY);
+            }
+
+            // Smooth animation
+            if (Math.abs(targetSpeed - currentSpeed) > 0.5) {
+                currentSpeed += (targetSpeed - currentSpeed) * 0.1;
+            } else {
+                currentSpeed = targetSpeed;
+            }
+
+            // Update digital display
+            speedValue.textContent = Math.round(currentSpeed);
+
+            requestAnimationFrame(drawSpeedometer);
+        }
+
+        // Start animation loop
+        drawSpeedometer();
+
+        // Auto-connect on load (optional)
+        // connectWebSocket();
+    </script>
+</body>
+</html>
